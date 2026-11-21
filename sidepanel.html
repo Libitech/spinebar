@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <title>Spinebar</title>
+  <link rel="stylesheet" href="sidepanel.css">
+</head>
+<body>
+  <header class="top">
+    <input id="search" type="search" placeholder="ブックマークとタブを検索" autocomplete="off">
+    <button id="addBookmark" class="icon-btn" title="現在のタブをブックマーク" aria-label="現在のタブをブックマーク">
+      <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" d="M4 2.5h6.5a.5.5 0 0 1 .5.5v10.5L7.25 11 3.5 13.5V3a.5.5 0 0 1 .5-.5z"/><path fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" d="M13.5 1.5v4M11.5 3.5h4"/></svg>
+    </button>
+    <button id="newTab" class="icon-btn" title="新しいタブ" aria-label="新しいタブ">
+      <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" d="M8 3v10M3 8h10"/></svg>
+    </button>
+    <button id="clearTabs" class="icon-btn" title="通常のタブをすべて閉じる" aria-label="通常のタブをすべて閉じる">
+      <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9.2 6.8 14 2"/><path d="M6.2 6.2l3.6 3.6"/></g><path fill="currentColor" d="M7 7 2 10l4 4 3-5z"/></svg>
+    </button>
+  </header>
+
+  <!-- ブックマークバー直下のリンク = Arcの「Favorites」 -->
+  <section id="favorites" class="favorites" hidden data-empty="タブをここにドラッグして追加"></section>
+
+  <!-- フォルダ = Arcの「Pinned」 -->
+  <section class="section collapsible" data-section="bookmarks">
+    <div class="section-title">
+      <button class="section-toggle" aria-expanded="true">
+        <span class="chev"></span><span>ブックマーク</span>
+      </button>
+    </div>
+    <ul id="tree" class="tree section-body"></ul>
+  </section>
+
+  <div class="divider"></div>
+
+  <!-- Chromeの固定タブ -->
+  <section id="pinnedSection" class="section collapsible" data-section="pinned" hidden>
+    <div class="section-title">
+      <button class="section-toggle" aria-expanded="true">
+        <span class="chev"></span><span>固定タブ</span>
+      </button>
+    </div>
+    <ul id="pinnedTabs" class="tabs section-body"></ul>
+  </section>
+
+  <!-- 通常のタブ = Arcの「Today」 -->
+  <section class="section collapsible" data-section="tabs">
+    <div class="section-title">
+      <button class="section-toggle" aria-expanded="true">
+        <span class="chev"></span><span>タブ</span>
+      </button>
+    </div>
+    <ul id="tabs" class="tabs section-body"></ul>
+  </section>
+
+  <div id="toast" class="toast" hidden></div>
+
+  <script src="sidepanel.js"></script>
+</body>
+</html>

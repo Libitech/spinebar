@@ -1,0 +1,53 @@
+{
+  "manifest_version": 3,
+  "name": "Spinebar",
+  "short_name": "Spinebar",
+  "version": "0.1.0",
+  "description": "ブックマークとタブを縦に並べて表示するサイドバー。フォルダ整理、固定タブ、検索に対応。",
+  "permissions": [
+    "sidePanel",
+    "bookmarks",
+    "tabs",
+    "favicon",
+    "storage"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "side_panel": {
+    "default_path": "sidepanel.html"
+  },
+  "action": {
+    "default_title": "Spinebarを開く",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png"
+    }
+  },
+  "commands": {
+    "_execute_action": {
+      "suggested_key": {
+        "default": "Alt+S",
+        "mac": "Alt+S"
+      },
+      "description": "Spinebarを開く"
+    }
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "<all_urls>"
+      ],
+      "js": [
+        "autoopen.js"
+      ],
+      "run_at": "document_start"
+    }
+  ]
+}
