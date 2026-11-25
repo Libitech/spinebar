@@ -34,6 +34,16 @@
 
   <div class="divider"></div>
 
+  <!-- 一時ピン：ブックマークにせず、拡張機能内だけに置いておくページ -->
+  <section id="tempPinSection" class="section collapsible" data-section="temp" hidden>
+    <div class="section-title">
+      <button class="section-toggle" aria-expanded="true">
+        <span class="chev"></span><span>ピン</span>
+      </button>
+    </div>
+    <ul id="tempPins" class="tabs section-body"></ul>
+  </section>
+
   <!-- Chromeの固定タブ -->
   <section id="pinnedSection" class="section collapsible" data-section="pinned" hidden>
     <div class="section-title">

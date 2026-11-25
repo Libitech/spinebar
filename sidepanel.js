@@ -4,6 +4,8 @@ const $ = (sel) => document.querySelector(sel);
 
 const ICON_FOLDER =
   '<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M1.5 3.5A1.5 1.5 0 0 1 3 2h3.2l1.5 1.5H13a1.5 1.5 0 0 1 1.5 1.5v6.5A1.5 1.5 0 0 1 13 13H3a1.5 1.5 0 0 1-1.5-1.5z"/></svg>';
+const ICON_PIN =
+  '<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" d="M6 2h4l-.5 4 2.5 2.5v1H4v-1L6.5 6z"/><path fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" d="M8 9.5V14"/></svg>';
 const ICON_CHEVRON =
   '<svg viewBox="0 0 12 12" width="12" height="12" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" d="M4.5 2.5 8 6l-3.5 3.5"/></svg>';
 
@@ -14,11 +16,13 @@ const state = {
   query: "",
   renaming: false,
   pendingRenameId: null, // 作成直後に名前入力を始めるフォルダ
-  collapsed: { bookmarks: false, pinned: false, tabs: false },
+  collapsed: { bookmarks: false, temp: false, pinned: false, tabs: false },
   openUrls: new Set(),
+  activeUrl: "",
+  tempPins: [], // [{ id, url, title, favIconUrl }] ブックマークとは別に chrome.storage.local に保存
 };
 
-let dragging = null; // { type: "bookmark", id } | { type: "tab", title, url }
+let dragging = null; // { type: "bookmark", id } | { type: "tab", title, url } | { type: "pin", id, title, url }
 
 /* ---------------- ユーティリティ ---------------- */
 
@@ -132,10 +136,13 @@ function makeDraggable(elm, payload) {
     dragging = payload;
     e.dataTransfer.effectAllowed = "copyMove";
     e.dataTransfer.setData("text/plain", payload.url || payload.title || "");
+    // 再描画でドラッグ元が消えないよう、少し遅らせて空のピン欄を出す
+    if (payload.type === "tab" && !state.tempPins.length) setTimeout(renderTempPins, 0);
   });
   elm.addEventListener("dragend", () => {
     dragging = null;
     clearDropMarks();
+    if (payload.type === "tab") renderTempPins();
   });
 }
 
@@ -153,7 +160,7 @@ async function applyDrop(dest) {
   try {
     if (d.type === "bookmark") {
       await chrome.bookmarks.move(d.id, dest);
-    } else if (d.type === "tab") {
+    } else if (d.type === "tab" || d.type === "pin") {
       await chrome.bookmarks.create({ ...dest, title: d.title, url: d.url });
       toast("ブックマークしました");
     }
@@ -173,7 +180,7 @@ function makeDropTarget(elm, node, opts) {
     clearDropMarks();
     elm.classList.add(`drop-${pos}`);
     elm.dataset.drop = pos;
-    e.dataTransfer.dropEffect = dragging.type === "tab" ? "copy" : "move";
+    e.dataTransfer.dropEffect = dragging.type === "bookmark" ? "move" : "copy";
   });
   elm.addEventListener("dragleave", () => elm.classList.remove("drop-before", "drop-after", "drop-into"));
   elm.addEventListener("drop", (e) => {
@@ -471,10 +478,183 @@ async function renderBookmarks() {
   }
 }
 
+/* ---------------- 一時ピン ----------------
+ * ブックマークに残すほどではないページを、Spinebar の中だけに置いておく。
+ * タブを閉じても（ほうきで片付けても）ピンは残り、クリックするとまた開く。
+ */
+
+function isPinnable(url) {
+  return !!url && !/^chrome:\/\/(newtab|new-tab-page)/.test(url) && !url.startsWith("javascript:");
+}
+
+function findPin(url) {
+  const n = normalizeUrl(url);
+  return state.tempPins.find((p) => normalizeUrl(p.url) === n);
+}
+
+function saveTempPins() {
+  return chrome.storage.local.set({ tempPins: state.tempPins });
+}
+
+function pinToggleItem(url, title, favIconUrl) {
+  const pinned = findPin(url);
+  return pinned
+    ? { label: "ピンを外す", action: () => removeTempPin(pinned.id) }
+    : { label: "ピン留め", action: () => addTempPin({ url, title, favIconUrl }) };
+}
+
+async function addTempPin({ url, title, favIconUrl }, index) {
+  if (!isPinnable(url)) return;
+  if (findPin(url)) return toast("すでにピン留めしています");
+  const pin = { id: crypto.randomUUID(), url, title: title || url, favIconUrl: favIconUrl || "" };
+  const list = [...state.tempPins];
+  list.splice(index ?? list.length, 0, pin);
+  state.tempPins = list;
+  if (state.collapsed.temp) setCollapsed("temp", false);
+  await saveTempPins();
+  renderAll();
+  toast("ピン留めしました");
+}
+
+async function removeTempPin(id) {
+  const index = state.tempPins.findIndex((p) => p.id === id);
+  if (index < 0) return;
+  const [removed] = state.tempPins.splice(index, 1);
+  await saveTempPins();
+  renderAll();
+  toast("ピンを外しました", {
+    label: "元に戻す",
+    run: async () => {
+      if (findPin(removed.url)) return;
+      state.tempPins.splice(Math.min(index, state.tempPins.length), 0, removed);
+      await saveTempPins();
+      renderAll();
+    },
+  });
+}
+
+async function moveTempPin(id, index) {
+  const from = state.tempPins.findIndex((p) => p.id === id);
+  if (from < 0) return;
+  const list = [...state.tempPins];
+  const [p] = list.splice(from, 1);
+  list.splice(from < index ? index - 1 : index, 0, p);
+  state.tempPins = list;
+  await saveTempPins();
+  renderAll();
+}
+
+function tempPinMenu(p) {
+  return [
+    { label: "新しいタブで開く", action: () => openBookmark(p.url, "new") },
+    {
+      label: "ブックマークに追加",
+      action: async () => {
+        const exists = await chrome.bookmarks.search({ url: p.url }).catch(() => []);
+        if (exists.length) return toast("すでにブックマーク済みです");
+        await chrome.bookmarks.create({ parentId: state.barId, title: p.title, url: p.url });
+        toast("ブックマークしました");
+      },
+    },
+    { label: "ピンを外す", danger: true, action: () => removeTempPin(p.id) },
+  ];
+}
+
+function tempPinItem(p, index) {
+  const n = normalizeUrl(p.url);
+  const isOpen = state.openUrls.has(n);
+  const li = el("li", `tab temp-pin${n === state.activeUrl ? " active" : ""}${isOpen ? "" : " closed"}`);
+  const row = el("div", "row");
+  row.title = p.url;
+  const title = el("span", "title");
+  title.textContent = p.title || p.url;
+  const unpin = el("button", "close");
+  unpin.textContent = "×";
+  unpin.title = "ピンを外す";
+  unpin.addEventListener("click", (e) => {
+    e.stopPropagation();
+    removeTempPin(p.id);
+  });
+  row.append(favImg(p.url, p.favIconUrl), title, unpin);
+  bindOpen(row, p.url);
+  row.addEventListener("contextmenu", (e) => showMenu(e, tempPinMenu(p)));
+  makeDraggable(row, { type: "pin", id: p.id, title: p.title, url: p.url });
+  // タブ・他のピンを重ねたら、その位置に入れる
+  row.addEventListener("dragover", (e) => {
+    if (!dragging || state.query || (dragging.type !== "tab" && dragging.type !== "pin")) return;
+    if (dragging.type === "pin" && dragging.id === p.id) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const pos = dropPosition(e, row);
+    clearDropMarks();
+    row.classList.add(`drop-${pos}`);
+    row.dataset.drop = pos;
+  });
+  row.addEventListener("dragleave", () => row.classList.remove("drop-before", "drop-after"));
+  row.addEventListener("drop", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const to = index + (row.dataset.drop === "after" ? 1 : 0);
+    clearDropMarks();
+    dropOnTempPins(to);
+  });
+  li.append(row);
+  return li;
+}
+
+function dropOnTempPins(index) {
+  const d = dragging;
+  dragging = null;
+  if (!d) return;
+  if (d.type === "pin") moveTempPin(d.id, index ?? state.tempPins.length);
+  else if (d.type === "tab") addTempPin({ url: d.url, title: d.title, favIconUrl: d.favIconUrl }, index);
+}
+
+// 「タブ」「固定タブ」の見出しや一覧にタブを落としたときもピンにできるよう、セクション全体を受け口にする
+function setupTempPinZone() {
+  const sec = $("#tempPinSection");
+  sec.addEventListener("dragover", (e) => {
+    if (!dragging || state.query || (dragging.type !== "tab" && dragging.type !== "pin")) return;
+    e.preventDefault();
+    if (!e.target.closest(".row")) {
+      clearDropMarks();
+      sec.classList.add("drop-zone");
+    }
+  });
+  sec.addEventListener("dragleave", (e) => {
+    if (!sec.contains(e.relatedTarget)) sec.classList.remove("drop-zone");
+  });
+  sec.addEventListener("drop", (e) => {
+    e.preventDefault();
+    clearDropMarks();
+    dropOnTempPins();
+  });
+}
+
+function renderTempPins() {
+  const q = state.query.toLowerCase();
+  const items = [];
+  state.tempPins.forEach((p, i) => {
+    if (q && !`${p.title} ${p.url}`.toLowerCase().includes(q)) return;
+    items.push(tempPinItem(p, i));
+  });
+  // タブをドラッグしている間は、空でも受け口として見せる
+  const showForDrop = !!dragging && dragging.type === "tab" && !state.query;
+  $("#tempPinSection").hidden = !(items.length || showForDrop);
+  if (!items.length && showForDrop) {
+    const empty = el("li", "empty");
+    empty.textContent = "ここにタブを落としてピン留め";
+    items.push(empty);
+  }
+  $("#tempPins").replaceChildren(...items);
+}
+
 /* ---------------- タブ描画 ---------------- */
 
 function tabMenu(t) {
+  const url = t.url || t.pendingUrl || "";
   return [
+    ...(isPinnable(url) ? [pinToggleItem(url, t.title, t.favIconUrl)] : []),
     {
       label: t.pinned ? "固定を解除" : "タブを固定",
       action: () => chrome.tabs.update(t.id, { pinned: !t.pinned }),
@@ -498,14 +678,24 @@ function tabItem(t) {
     e.stopPropagation();
     chrome.tabs.remove(t.id);
   });
-  row.append(favImg(url, t.favIconUrl), title, close);
+  row.append(favImg(url, t.favIconUrl), title);
+  if (isPinnable(url) && !findPin(url)) {
+    const pin = el("button", "pin-btn", ICON_PIN);
+    pin.title = "ピン留め";
+    pin.addEventListener("click", (e) => {
+      e.stopPropagation();
+      addTempPin({ url, title: t.title, favIconUrl: t.favIconUrl });
+    });
+    row.append(pin);
+  }
+  row.append(close);
   row.addEventListener("click", () => chrome.tabs.update(t.id, { active: true }));
   row.addEventListener("auxclick", (e) => {
     if (e.button === 1) chrome.tabs.remove(t.id); // 中クリックで閉じる
   });
   row.addEventListener("contextmenu", (e) => showMenu(e, tabMenu(t)));
   if (url && !url.startsWith("chrome://newtab")) {
-    makeDraggable(row, { type: "tab", tabId: t.id, pinned: t.pinned, title: t.title || url, url });
+    makeDraggable(row, { type: "tab", tabId: t.id, pinned: t.pinned, title: t.title || url, url, favIconUrl: t.favIconUrl });
   }
   li.append(row);
   return li;
@@ -514,6 +704,9 @@ function tabItem(t) {
 async function renderTabs() {
   const tabs = await chrome.tabs.query({ windowId: state.windowId });
   state.openUrls = new Set(tabs.map((t) => normalizeUrl(t.url || t.pendingUrl)));
+  const active = tabs.find((t) => t.active);
+  state.activeUrl = active ? normalizeUrl(active.url || active.pendingUrl) : "";
+  renderTempPins();
 
   const q = state.query.toLowerCase();
   const pinned = [];
@@ -627,6 +820,7 @@ function bindUI() {
   });
 
   setupFavoritesZone();
+  setupTempPinZone();
 
   // 行以外（見出し・空いている部分）の右クリック
   document.body.addEventListener("contextmenu", (e) => {
@@ -645,6 +839,12 @@ function bindChromeEvents() {
   for (const ev of ["onCreated", "onRemoved", "onUpdated", "onActivated", "onMoved", "onAttached", "onDetached"]) {
     chrome.tabs[ev].addListener(scheduleAll);
   }
+  // 他のウィンドウのサイドバーでピンが変わったら反映
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area !== "local" || !changes.tempPins) return;
+    state.tempPins = changes.tempPins.newValue || [];
+    renderTempPins();
+  });
 }
 
 async function init() {
@@ -652,8 +852,9 @@ async function init() {
   chrome.storage.session.set({ autoOpened: true }).catch(() => {});
   const win = await chrome.windows.getCurrent();
   state.windowId = win.id;
-  const saved = await chrome.storage.local.get(["openFolders", "collapsed", "bookmarksCollapsed"]);
+  const saved = await chrome.storage.local.get(["openFolders", "collapsed", "bookmarksCollapsed", "tempPins"]);
   state.openFolders = new Set(saved.openFolders || []);
+  state.tempPins = saved.tempPins || [];
   state.collapsed = {
     ...state.collapsed,
     bookmarks: !!saved.bookmarksCollapsed, // 旧バージョンの設定を引き継ぐ
