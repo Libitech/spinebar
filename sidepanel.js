@@ -136,13 +136,10 @@ function makeDraggable(elm, payload) {
     dragging = payload;
     e.dataTransfer.effectAllowed = "copyMove";
     e.dataTransfer.setData("text/plain", payload.url || payload.title || "");
-    // 再描画でドラッグ元が消えないよう、少し遅らせて空のピン欄を出す
-    if (payload.type === "tab" && !state.tempPins.length) setTimeout(renderTempPins, 0);
   });
   elm.addEventListener("dragend", () => {
     dragging = null;
     clearDropMarks();
-    if (payload.type === "tab") renderTempPins();
   });
 }
 
@@ -638,12 +635,11 @@ function renderTempPins() {
     if (q && !`${p.title} ${p.url}`.toLowerCase().includes(q)) return;
     items.push(tempPinItem(p, i));
   });
-  // タブをドラッグしている間は、空でも受け口として見せる
-  const showForDrop = !!dragging && dragging.type === "tab" && !state.query;
-  $("#tempPinSection").hidden = !(items.length || showForDrop);
-  if (!items.length && showForDrop) {
+  // 機能に気づけるよう、空でも案内つきで表示する（検索中で一致がない時だけ隠す）
+  $("#tempPinSection").hidden = !!q && !items.length;
+  if (!items.length) {
     const empty = el("li", "empty");
-    empty.textContent = "ここにタブを落としてピン留め";
+    empty.textContent = "タブのピンボタンか、ここへのドラッグでピン留め";
     items.push(empty);
   }
   $("#tempPins").replaceChildren(...items);
